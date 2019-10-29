@@ -1,0 +1,7 @@
+﻿  CWebSocket.cpp
+C:\Users\Olo44\source\repos\WebSocket\WebSocket\CWebSocket.cpp(44): warning C4018: '<': signed/unsigned mismatch
+C:\Users\Olo44\source\repos\WebSocket\WebSocket\CWebSocket.cpp(190): warning C4018: '<': signed/unsigned mismatch
+C:\Users\Olo44\source\repos\WebSocket\WebSocket\CWebSocket.cpp(222): warning C4293: '<<': shift count negative or too big, undefined behavior
+  WebSocket.cpp
+  Generating Code...
+  WebSocket.vcxproj -> C:\Users\Olo44\source\repos\WebSocket\Debug\WebSocket.exe
