@@ -6,11 +6,26 @@
 
 #define MAX_SERVER_CLIENTS 16
 
+enum WebSocketCloseReason
+{
+	NORMAL = 1000,
+	GOING_AWAY,
+	PROTOCOL_ERROR,
+	WRONG_DATA_TYPE,
+	NON_CONSISTENT_TYPE_OF_MESSAGE = 1007,
+	POLICY_VIOLATION,
+	TOO_BIG_MESSAGE,
+	UNEXPECTED_CONDITION = 1011,
+
+};
+
 enum WebSocketOpcodes
 {
-	TEXT = 0x1,
+	CONTINUATION=0x0,
+	TEXT,
 	BINARY,
-	PING = 0x9,
+	CLOSE =0x8,
+	PING,
 	PONG,
 
 };
@@ -25,9 +40,15 @@ struct WebSocketFrameFormat
 	uint8_t Opcode : 4;
 	bool MASK;
 	uint8_t PayloadLen : 7;
-	uint16_t ExtendedPayloadLength126;
-	uint64_t ExtendedPayloadLength127;
+	union {
+		uint16_t ExtendedPayloadLength126;
+		uint64_t ExtendedPayloadLength127;
+	};
 	char MaskingKey[4];
+	char* PtrToData;
+
+	void Decode(char* Buffer,const char* Message, uint64_t* EncodedLen);
+	int Encode(char* Buffer,bool FinFlag, bool RSV1, bool RSV2, bool RSV3, uint8_t Opcode, bool Mask, uint64_t PayloadLen);
 };
 
 struct WebSocketInstance
@@ -58,9 +79,8 @@ public:
 	void BindRecieveFunction(std::function<void(std::shared_ptr<WebSocketInstance>, char*, uint64_t)>);
 	~CWebSocket();
 
-	void SendWebSocket(std::shared_ptr<SocketInstance>,char*, int);
-
-	void CloseConnection(std::shared_ptr<WebSocketInstance>);
+	void SendWebSocket(std::shared_ptr<WebSocketInstance>,const char*, uint64_t, WebSocketOpcodes);
+	void CloseConnection(std::shared_ptr<WebSocketInstance>,WebSocketCloseReason);
 
 
 	void RecieveWebSocket(std::shared_ptr<SocketInstance>, char*, int);

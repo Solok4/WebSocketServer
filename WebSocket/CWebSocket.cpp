@@ -11,7 +11,7 @@ bool CWebSocket::CreateWebSocketServer(bool isSecure)
 	if(isSecure) ListeningSocket->SetupServer("443");
 	else ListeningSocket->SetupServer("80");
 	ListeningSocket->CreateListeningThread(MAX_SERVER_CLIENTS);
-	Sleep(10);
+	Sleep(50);
 	this->ServerSocketInstances = ListeningSocket->GetServerSockets();
 	this->HandeFunc = [&](std::shared_ptr<SocketInstance> a, char* b, int c) {
 		this->RecieveWebSocket(a, b, c);
@@ -23,6 +23,10 @@ bool CWebSocket::CreateWebSocketServer(bool isSecure)
 
 void CWebSocket::CloseWebSocketServer()
 {
+	for (auto ws : this->WebSocketInstances)
+	{
+		this->CloseConnection(ws,WebSocketCloseReason::GOING_AWAY);
+	}
 	ListeningSocket->StopListeningThread();
 	ListeningSocket->CloseConnection();
 	this->SocketWrapper.CloseSocket("WebSocket");
@@ -169,19 +173,35 @@ void CWebSocket::ProcessRequest(std::shared_ptr<SocketInstance> soc, char* data,
 	}
 }
 
-void CWebSocket::CloseConnection(std::shared_ptr<WebSocketInstance> WSoc)
+void CWebSocket::SendWebSocket(std::shared_ptr<WebSocketInstance> WSoc, const char* data, uint64_t datalen, WebSocketOpcodes Opcode)
 {
 	WebSocketFrameFormat WSFormat;
-	WSFormat.FIN = true;
-	WSFormat.RSV1 = true;
-	WSFormat.RSV2 = true;
-	WSFormat.RSV3 = true;
-	WSFormat.MASK = false;
-	WSFormat.Opcode = 0x8;
+	char SendBuffer[1024];
+	int Headersize = WSFormat.Encode(SendBuffer, true, false, false, false,Opcode, false, datalen);
+	char* PtrToSendBuffer = SendBuffer;
+	PtrToSendBuffer += Headersize;
+	strcat_s(PtrToSendBuffer,sizeof(SendBuffer)-Headersize,data);
+	WSoc->Socket->SendTCPClient(SendBuffer, Headersize+datalen);
+}
 
+void CWebSocket::CloseConnection(std::shared_ptr<WebSocketInstance> WSoc,WebSocketCloseReason Reason)
+{
+	WebSocketFrameFormat WSFormat;
+	char Buffer[64];
+	int HeaderSize = WSFormat.Encode(Buffer, true, false, false, false, WebSocketOpcodes::CLOSE, false, 3);
+	int SendBuffSize = HeaderSize;
+	Buffer[SendBuffSize++]= Reason >> 8;
+	Buffer[SendBuffSize++] = Reason &0xff;
+	Buffer[SendBuffSize++] = '\0';
 
-
-	WSoc->Socket->SendTCPClient((void*)&WSFormat, sizeof(WSFormat));
+	WSoc->Socket->SendTCPClient(Buffer, SendBuffSize);
+	for (int i = 0; i < this->WebSocketInstances.size(); i++)
+	{
+		if (this->WebSocketInstances[i]->Socket->GetSocket() == WSoc->Socket->GetSocket())
+		{
+			this->WebSocketInstances.erase(this->WebSocketInstances.begin() + i);
+		}
+	}
 }
 
 void CWebSocket::RecieveWebSocket(std::shared_ptr<SocketInstance> soc, char* data, int length)
@@ -198,49 +218,108 @@ void CWebSocket::RecieveWebSocket(std::shared_ptr<SocketInstance> soc, char* dat
 	if (WSInstance == nullptr) return;
 
 	WebSocketFrameFormat WSFormat;
+	char DecodedMessage[1024];
 	uint64_t EncodedLen = 0;
+	WSFormat.Decode(DecodedMessage,data, &EncodedLen);
+
+	this->WebSocketRecieveFunc(WSInstance, DecodedMessage, EncodedLen);
+}
+
+void WebSocketFrameFormat::Decode(char* Buffer,const char* Message,uint64_t* EncodedLen)
+{
 	byte SingleCharacter;
+	*EncodedLen = 0;
 	int ActualByte = 0;
-	SingleCharacter = data[ActualByte++];
-	WSFormat.FIN = (SingleCharacter >> 7) & 0x1;
-	WSFormat.RSV1 = (SingleCharacter >> 6) & 0x1;
-	WSFormat.RSV2 = (SingleCharacter >> 5) & 0x1;
-	WSFormat.RSV3 = (SingleCharacter >> 4) & 0x1;
-	WSFormat.Opcode = SingleCharacter >> 3 & 0xF;
-	SingleCharacter = data[ActualByte++];
-	WSFormat.MASK = (SingleCharacter >> 7) & 0x1;
-	WSFormat.PayloadLen = SingleCharacter & 0x7F;
-	if (WSFormat.PayloadLen == 126)
+	SingleCharacter = Message[ActualByte++];
+	this->FIN = (SingleCharacter >> 7) & 0x1;
+	this->RSV1 = (SingleCharacter >> 6) & 0x1;
+	this->RSV2 = (SingleCharacter >> 5) & 0x1;
+	this->RSV3 = (SingleCharacter >> 4) & 0x1;
+	this->Opcode = SingleCharacter >> 3 & 0xF;
+	SingleCharacter = Message[ActualByte++];
+	this->MASK = (SingleCharacter >> 7) & 0x1;
+	this->PayloadLen = SingleCharacter & 0x7F;
+	if (this->PayloadLen == 126)
 	{
-		uint16_t PayloadLen = data[ActualByte] << 8 | data[ActualByte+1];
-		WSFormat.ExtendedPayloadLength126 = PayloadLen;
+		uint16_t PayloadLen = Message[ActualByte] << 8 | Message[ActualByte + 1];
+		this->ExtendedPayloadLength126 = PayloadLen;
 		ActualByte += 2;
-		EncodedLen = WSFormat.ExtendedPayloadLength126;
+		*EncodedLen = this->ExtendedPayloadLength126;
 	}
-	else if (WSFormat.PayloadLen == 127)
+	else if (this->PayloadLen == 127)
 	{
-		uint64_t PayloadLen = data[ActualByte] << 56 | data[ActualByte + 1] << 48 | data[ActualByte+2] << 40 | data[ActualByte + 3] << 32 |
-								data[ActualByte+4] << 24 | data[ActualByte + 5] << 16 | data[ActualByte+6] << 8 | data[ActualByte + 7];
-		WSFormat.ExtendedPayloadLength127 = PayloadLen;
+		uint64_t PayloadLen = Message[ActualByte] << 56 | Message[ActualByte + 1] << 48 | Message[ActualByte + 2] << 40 | Message[ActualByte + 3] << 32 |
+			Message[ActualByte + 4] << 24 | Message[ActualByte + 5] << 16 | Message[ActualByte + 6] << 8 | Message[ActualByte + 7];
+		this->ExtendedPayloadLength127 = PayloadLen;
 		ActualByte += 8;
-		EncodedLen = WSFormat.ExtendedPayloadLength127;
+		*EncodedLen = this->ExtendedPayloadLength127;
 	}
 	else
 	{
-		EncodedLen = WSFormat.PayloadLen;
+		*EncodedLen = this->PayloadLen;
 	}
-	WSFormat.MaskingKey[0] = data[ActualByte];
-	WSFormat.MaskingKey[1] = data[ActualByte + 1];
-	WSFormat.MaskingKey[2] = data[ActualByte + 2];
-	WSFormat.MaskingKey[3] = data[ActualByte + 3];
+	this->MaskingKey[0] = Message[ActualByte];
+	this->MaskingKey[1] = Message[ActualByte + 1];
+	this->MaskingKey[2] = Message[ActualByte + 2];
+	this->MaskingKey[3] = Message[ActualByte + 3];
 	ActualByte += 4;
 
-	char DecodedMessage[1024];
-	for (int i = 0; i < EncodedLen; i++)
+	for (int i = 0; i < *EncodedLen; i++)
 	{
-		DecodedMessage[i] = data[ActualByte++] ^ WSFormat.MaskingKey[i % 4];
+		Buffer[i] = Message[ActualByte++] ^ this->MaskingKey[i % 4];
 	}
-	//Clog::Log(LogTag::Info, "%s sent > %.*s\n", soc->GetName(), (int)EncodedLen, DecodedMessage);
+}
 
-	this->WebSocketRecieveFunc(WSInstance, DecodedMessage, EncodedLen);
+int WebSocketFrameFormat::Encode(char* Buffer, bool FinFlag, bool RSV1, bool RSV2, bool RSV3, uint8_t Opcode, bool Mask, uint64_t PayloadLen)
+{
+	char* PtrToBuffer;
+	char SingleChar;
+	int HeaderSize = 0;
+
+	PtrToBuffer = Buffer;
+	SingleChar = FinFlag << 7;
+	SingleChar += RSV1 << 6;
+	SingleChar += RSV2 << 5;
+	SingleChar += RSV3 << 4;
+	SingleChar += Opcode;
+	*PtrToBuffer = SingleChar;
+	PtrToBuffer += 1;
+	HeaderSize += 1;
+	
+	SingleChar = Mask << 7;
+	if (PayloadLen <= 125)
+	{
+		SingleChar += PayloadLen;
+		*PtrToBuffer = SingleChar;
+		PtrToBuffer += 1;
+		HeaderSize += 1;
+	}
+	else if ((PayloadLen > 125) && (PayloadLen < 0xffff))
+	{
+		SingleChar += 126;
+		*PtrToBuffer = SingleChar;
+		*(PtrToBuffer + 1) = PayloadLen >> 8;
+		*(PtrToBuffer + 2) = PayloadLen &0xff;
+		PtrToBuffer += 3;
+		HeaderSize += 3;
+	}
+	else
+	{
+		SingleChar += 127;
+		*PtrToBuffer = SingleChar;
+		*(PtrToBuffer + 1) = (PayloadLen >> 56) & 0xff;
+		*(PtrToBuffer + 2) = (PayloadLen >> 48) & 0xff;
+		*(PtrToBuffer + 3) = (PayloadLen >> 40) & 0xff;
+		*(PtrToBuffer + 4) = (PayloadLen >> 32) & 0xff;
+		*(PtrToBuffer + 5) = (PayloadLen >> 24) & 0xff;
+		*(PtrToBuffer + 6) = (PayloadLen >> 16) & 0xff;
+		*(PtrToBuffer + 7) = (PayloadLen >> 8 ) & 0xff;
+		*(PtrToBuffer + 8) = PayloadLen & 0xff;
+
+		PtrToBuffer += 9;
+		HeaderSize += 9;
+	}
+	*PtrToBuffer = '\0';
+
+	return HeaderSize;
 }

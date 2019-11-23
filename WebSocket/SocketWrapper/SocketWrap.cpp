@@ -450,7 +450,7 @@ void SocketInstance::SendTCPClient(void* data, size_t size)
 			ptr += PartSize;
 			length -= PartSize;
 		}
-		Clog::Log(LogTag::Info, "%s > Sent %d bytes", this->_Name, size);
+		//Clog::Log(LogTag::Info, "%s > Sent %d bytes", this->_Name, size);
 	}
 	else
 	{
@@ -685,8 +685,8 @@ std::shared_ptr<SocketInstance> SocketWrap::CreateSocket(const char* name, IPPRO
 	strcpy_s(FinalName, 32, name);
 	//strncpy(FinalName, name,32);
 
-	ReuseAddr = 1;
-	setsockopt(soc, SOL_SOCKET, SO_REUSEADDR, (const char*)& ReuseAddr, ReuseAddrLen);
+	//ReuseAddr = 1;
+	//setsockopt(soc, SOL_SOCKET, SO_REUSEADDR, (const char*)& ReuseAddr, ReuseAddrLen);
 
 	NonBlocking = 1;
 #ifdef _WIN32

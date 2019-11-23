@@ -1,0 +1,36 @@
+<html>
+<head>
+<script>
+let ws = new WebSocket("ws://localhost");
+ws.onopen = function(e) {
+  alert("[open] Connection established");
+  alert("Sending to server");
+  ws.send("My name is John");
+  ws.send("Second Message Test");
+};
+
+ws.onmessage = function(event) {
+  document.getElementById('Demo').innerHTML = event.data;
+};
+
+ws.onclose = function(event) {
+  if (event.wasClean) {
+    alert(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+  } else {
+    // e.g. server process killed or network down
+    // event.code is usually 1006 in this case
+    alert('[close] Connection died');
+  }
+};
+
+ws.onerror = function(error) {
+  alert(`[error] ${error.message}`);
+};
+</script>
+<script src="./test.js"></script>
+</head>
+<body>
+<p>Websocket Test Page</p><br>
+<p id="Demo"></p>
+</body>
+</html>

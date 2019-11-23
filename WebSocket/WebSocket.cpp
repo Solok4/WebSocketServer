@@ -9,10 +9,10 @@ int main()
 	CWebSocket soc;
 	soc.CreateWebSocketServer(false);
 	soc.BindRecieveFunction([&](std::shared_ptr<WebSocketInstance> a,char* b, uint64_t c) {
-		Clog::Log(LogTag::Info, "%s sent > %.*s", a->Socket->GetName(), (int)c, b);
-		soc.CloseConnection(a);
+		Clog::Log(LogTag::Info, "Recieved from %s  > %.*s", a->Socket->GetName(), (int)c, b);
+		soc.SendWebSocket(a, "TestMessage", 12, WebSocketOpcodes::TEXT);
 		});
-	Sleep(30000);
+	Sleep(5000);
 	soc.CloseWebSocketServer();
 }
 
